@@ -1,0 +1,156 @@
+variables:
+  TF_ROOT: infra/terraform/environments/prod
+  TF_STATE_KEY: prod.terraform.tfstate
+  DOCKER_DRIVER: overlay2
+
+stages:
+  - test
+  - build
+  - plan
+  - deploy
+  - backup
+
+# ---------------------------------------------------------------------
+# Test: both tiers, run on every push/MR. API tests run against a real
+# Postgres service container; web tests mock the API over HTTP (nock).
+# ---------------------------------------------------------------------
+
+test:web:
+  stage: test
+  image: node:18-alpine
+  script:
+    - cd web
+    - npm ci
+    - npm test
+
+test:api:
+  stage: test
+  image: node:18-alpine
+  services:
+    - name: postgres:15-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: appdb
+    POSTGRES_USER: appuser
+    POSTGRES_PASSWORD: apppass
+    DBHOST: postgres
+    DBUSER: appuser
+    DBPASS: apppass
+    DB: appdb
+    DBPORT: "5432"
+  script:
+    - cd api
+    - npm ci
+    - npm test
+
+# ---------------------------------------------------------------------
+# Build: images are only pushed from the default branch, tagged with the
+# commit SHA so every deploy is traceable to an exact, tested commit.
+# ---------------------------------------------------------------------
+
+.build_template: &build_template
+  stage: build
+  image: mcr.microsoft.com/azure-cli:2.60.0
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  before_script:
+    - az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID"
+    - az acr login --name "$ACR_NAME"
+
+build:web:
+  <<: *build_template
+  needs: ["test:web"]
+  script:
+    - docker build -t "$ACR_LOGIN_SERVER/web:$CI_COMMIT_SHORT_SHA" -t "$ACR_LOGIN_SERVER/web:latest" ./web
+    - docker push "$ACR_LOGIN_SERVER/web:$CI_COMMIT_SHORT_SHA"
+    - docker push "$ACR_LOGIN_SERVER/web:latest"
+
+build:api:
+  <<: *build_template
+  needs: ["test:api"]
+  script:
+    - docker build -t "$ACR_LOGIN_SERVER/api:$CI_COMMIT_SHORT_SHA" -t "$ACR_LOGIN_SERVER/api:latest" ./api
+    - docker push "$ACR_LOGIN_SERVER/api:$CI_COMMIT_SHORT_SHA"
+    - docker push "$ACR_LOGIN_SERVER/api:latest"
+
+# ---------------------------------------------------------------------
+# Terraform plan/apply. `apply` is intentionally a manual gate: the task
+# calls for zero-downtime, automated *deploys*, not unreviewed infra
+# changes running unattended - the image tag bump (the actual app deploy)
+# is what's fully automatic once approved.
+# ---------------------------------------------------------------------
+
+.terraform_template: &terraform_template
+  image: hashicorp/terraform:1.11
+  before_script:
+    - cd "$TF_ROOT"
+    - terraform init
+      -backend-config="resource_group_name=$TF_BACKEND_RG"
+      -backend-config="storage_account_name=$TF_BACKEND_SA"
+      -backend-config="container_name=tfstate"
+      -backend-config="key=$TF_STATE_KEY"
+
+plan:
+  <<: *terraform_template
+  stage: plan
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - terraform validate
+    - terraform plan
+      -var "web_image_tag=$CI_COMMIT_SHORT_SHA"
+      -var "api_image_tag=$CI_COMMIT_SHORT_SHA"
+      -var "admin_ssh_public_key=$ADMIN_SSH_PUBLIC_KEY"
+      -var "backup_storage_account_name=$BACKUP_STORAGE_ACCOUNT_NAME"
+      -out=tfplan
+  artifacts:
+    paths:
+      - "$TF_ROOT/tfplan"
+    expire_in: 1 day
+
+apply:
+  <<: *terraform_template
+  stage: deploy
+  needs: ["plan", "build:web", "build:api"]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+  script:
+    # Re-plan with the same vars rather than reusing the plan artifact,
+    # since the images referenced by this exact commit were only pushed to
+    # ACR in the build stage that ran after `plan`.
+    - terraform apply -auto-approve
+      -var "web_image_tag=$CI_COMMIT_SHORT_SHA"
+      -var "api_image_tag=$CI_COMMIT_SHORT_SHA"
+      -var "admin_ssh_public_key=$ADMIN_SSH_PUBLIC_KEY"
+      -var "backup_storage_account_name=$BACKUP_STORAGE_ACCOUNT_NAME"
+    # upgrade_mode = "Rolling" on both VMSS means this apply alone triggers
+    # a batched, health-probe-gated rolling replacement of instances with
+    # the new image tag - no separate "instance refresh" step needed.
+
+# ---------------------------------------------------------------------
+# Backup: runs only on a GitLab scheduled pipeline (configure a daily
+# schedule for this project in CI/CD > Schedules). No VNet access is
+# required from the runner - see infra/scripts/backup/trigger-daily-backup.sh.
+# ---------------------------------------------------------------------
+
+backup:database:
+  stage: backup
+  image: mcr.microsoft.com/azure-cli:2.60.0
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+  before_script:
+    - az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID"
+  script:
+    - chmod +x infra/scripts/backup/trigger-daily-backup.sh
+    - >
+      RESOURCE_GROUP="$RESOURCE_GROUP"
+      API_VMSS_NAME="${NAME_PREFIX}-vmss-api"
+      DB_HOST="$DB_HOST"
+      DB_USER="$DB_USER"
+      DB_NAME="$DB_NAME"
+      DB_PASSWORD_SECRET_URI="$DB_PASSWORD_SECRET_URI"
+      STORAGE_ACCOUNT="$BACKUP_STORAGE_ACCOUNT_NAME"
+      STORAGE_CONTAINER="db-backups"
+      ./infra/scripts/backup/trigger-daily-backup.sh
