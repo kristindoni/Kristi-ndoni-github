@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars for local runs (gitignored), or supply the
+# equivalent -var flags from CI (see .gitlab-ci.yml).
+
+name_prefix                 = "n3t-prod"
+location                    = "westeurope"
+admin_ssh_public_key        = "ssh-ed25519 AAAA... you@example.com"
+backup_storage_account_name = "n3tprodbackups" # globally unique, <=24 chars, lowercase alphanumeric
+web_image_tag                = "latest"
+api_image_tag                = "latest"
+web_instances                = 2
+api_instances                = 2

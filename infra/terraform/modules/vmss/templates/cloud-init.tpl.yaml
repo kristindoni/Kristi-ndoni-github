@@ -1,0 +1,75 @@
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+  - jq
+  - curl
+
+write_files:
+  - path: /usr/local/bin/acr-login.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Logs the host in to ACR using the VMSS instance's managed identity
+      # (no ACR admin credentials or secrets involved).
+      set -euo pipefail
+      AAD_TOKEN=$(curl -s -H Metadata:true \
+        "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2019-08-01&resource=https://management.azure.com/" \
+        | jq -r .access_token)
+      ACR_REFRESH_TOKEN=$(curl -s -X POST "https://${acr_login_server}/oauth2/exchange" \
+        -d "grant_type=access_token&service=${acr_login_server}&access_token=$AAD_TOKEN" \
+        | jq -r .refresh_token)
+      echo "$ACR_REFRESH_TOKEN" | docker login ${acr_login_server} \
+        -u 00000000-0000-0000-0000-000000000000 --password-stdin
+
+  - path: /usr/local/bin/run-app.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Pulls and (re)starts the application container. Run at boot by
+      # app.service, and re-run by the deploy pipeline via `az vmss run-command`
+      # during an instance refresh if a faster in-place update is ever needed.
+      set -euo pipefail
+
+      IMAGE="${acr_login_server}/${image_name}:${image_tag}"
+      ARGS=(--name "${app_name}" --log-driver=journald --restart=unless-stopped
+            -p ${container_port}:${container_port})
+
+      %{ for key, value in container_env ~}
+      ARGS+=(-e "${key}=${value}")
+      %{ endfor ~}
+
+      %{ if db_password_secret_uri != "" ~}
+      DBPASS=$(curl -s -H Metadata:true \
+        "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2019-08-01&resource=https://vault.azure.net" \
+        | jq -r .access_token \
+        | { read -r TOKEN; curl -s -H "Authorization: Bearer $TOKEN" \
+            "${db_password_secret_uri}?api-version=7.4" | jq -r .value; })
+      ARGS+=(-e "DBPASS=$DBPASS")
+      %{ endif ~}
+
+      /usr/local/bin/acr-login.sh
+      docker pull "$IMAGE"
+      docker rm -f "${app_name}" >/dev/null 2>&1 || true
+      docker run -d "$${ARGS[@]}" "$IMAGE"
+
+  - path: /etc/systemd/system/app.service
+    content: |
+      [Unit]
+      Description=${app_name} container
+      After=docker.service network-online.target
+      Requires=docker.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/bin/run-app.sh
+      ExecStop=/usr/bin/docker stop ${app_name}
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable --now app.service
