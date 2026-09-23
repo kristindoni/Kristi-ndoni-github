@@ -1,0 +1,159 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  TF_ROOT: infra/terraform/environments/prod
+
+jobs:
+  test-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      - run: npm ci
+        working-directory: web
+      - run: npm test
+        working-directory: web
+
+  test-api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: appdb
+          POSTGRES_USER: appuser
+          POSTGRES_PASSWORD: apppass
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DBHOST: localhost
+      DBPORT: "5432"
+      DBUSER: appuser
+      DBPASS: apppass
+      DB: appdb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      - run: npm ci
+        working-directory: api
+      - run: npm test
+        working-directory: api
+
+  build:
+    needs: [test-web, test-api]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.ARM_CLIENT_ID }}
+          tenant-id: ${{ secrets.ARM_TENANT_ID }}
+          subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      - name: ACR login
+        run: az acr login --name "${{ vars.ACR_NAME }}"
+      - name: Build and push web
+        run: |
+          docker build -t "${{ vars.ACR_LOGIN_SERVER }}/web:${{ github.sha }}" \
+                        -t "${{ vars.ACR_LOGIN_SERVER }}/web:latest" ./web
+          docker push "${{ vars.ACR_LOGIN_SERVER }}/web:${{ github.sha }}"
+          docker push "${{ vars.ACR_LOGIN_SERVER }}/web:latest"
+      - name: Build and push api
+        run: |
+          docker build -t "${{ vars.ACR_LOGIN_SERVER }}/api:${{ github.sha }}" \
+                        -t "${{ vars.ACR_LOGIN_SERVER }}/api:latest" ./api
+          docker push "${{ vars.ACR_LOGIN_SERVER }}/api:${{ github.sha }}"
+          docker push "${{ vars.ACR_LOGIN_SERVER }}/api:latest"
+
+  plan:
+    needs: [test-web, test-api]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.ARM_CLIENT_ID }}
+          tenant-id: ${{ secrets.ARM_TENANT_ID }}
+          subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      - name: Terraform init
+        working-directory: ${{ env.TF_ROOT }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_BACKEND_RG }}" \
+            -backend-config="storage_account_name=${{ vars.TF_BACKEND_SA }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=prod.terraform.tfstate"
+      - name: Terraform validate & plan
+        working-directory: ${{ env.TF_ROOT }}
+        run: |
+          terraform validate
+          terraform plan \
+            -var "web_image_tag=${{ github.sha }}" \
+            -var "api_image_tag=${{ github.sha }}" \
+            -var "admin_ssh_public_key=${{ secrets.ADMIN_SSH_PUBLIC_KEY }}" \
+            -var "backup_storage_account_name=${{ vars.BACKUP_STORAGE_ACCOUNT_NAME }}"
+
+  apply:
+    needs: [build, plan]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Requires a manual approval gate: configure a "production" environment
+    # in GitHub repo Settings > Environments with required reviewers. This
+    # keeps infrastructure changes reviewed while the underlying app
+    # deploy (the image tag bump) is otherwise fully automated end to end.
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.ARM_CLIENT_ID }}
+          tenant-id: ${{ secrets.ARM_TENANT_ID }}
+          subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      - name: Terraform init
+        working-directory: ${{ env.TF_ROOT }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_BACKEND_RG }}" \
+            -backend-config="storage_account_name=${{ vars.TF_BACKEND_SA }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=prod.terraform.tfstate"
+      - name: Terraform apply
+        working-directory: ${{ env.TF_ROOT }}
+        run: |
+          terraform apply -auto-approve \
+            -var "web_image_tag=${{ github.sha }}" \
+            -var "api_image_tag=${{ github.sha }}" \
+            -var "admin_ssh_public_key=${{ secrets.ADMIN_SSH_PUBLIC_KEY }}" \
+            -var "backup_storage_account_name=${{ vars.BACKUP_STORAGE_ACCOUNT_NAME }}"
+          # upgrade_mode = "Rolling" on both VMSS means this apply alone
+          # triggers a batched, health-probe-gated rolling replacement of
+          # instances with the new image tag - zero downtime, no separate
+          # "instance refresh" step needed.

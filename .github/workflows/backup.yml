@@ -1,0 +1,33 @@
+name: Daily database backup
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.ARM_CLIENT_ID }}
+          tenant-id: ${{ secrets.ARM_TENANT_ID }}
+          subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      - name: Trigger pg_dump export via az vmss run-command
+        run: |
+          chmod +x infra/scripts/backup/trigger-daily-backup.sh
+          RESOURCE_GROUP="${{ vars.RESOURCE_GROUP }}" \
+          API_VMSS_NAME="${{ vars.NAME_PREFIX }}-vmss-api" \
+          DB_HOST="${{ vars.DB_HOST }}" \
+          DB_USER="${{ vars.DB_USER }}" \
+          DB_NAME="${{ vars.DB_NAME }}" \
+          DB_PASSWORD_SECRET_URI="${{ vars.DB_PASSWORD_SECRET_URI }}" \
+          STORAGE_ACCOUNT="${{ vars.BACKUP_STORAGE_ACCOUNT_NAME }}" \
+          STORAGE_CONTAINER="db-backups" \
+          ./infra/scripts/backup/trigger-daily-backup.sh

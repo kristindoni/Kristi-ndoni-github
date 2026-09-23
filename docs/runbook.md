@@ -1,5 +1,15 @@
 # Operations runbook
 
+## Why GitHub Actions, not git.toptal.com's own CI
+
+git.toptal.com's GitLab instance has no active runners for this project (no
+shared runners on the instance), so a `.gitlab-ci.yml` pipeline there just
+sits stuck. The task explicitly allows this: "You can use another git
+provider to leverage hooks, CI/CD... not enabled in Toptal's git." So the
+pipeline **executes** on GitHub Actions against a GitHub mirror of this
+repo, while the pipeline **code** (`.github/workflows/`) is committed to
+Toptal git as required, same as everything else.
+
 ## One-time setup
 
 1. Bootstrap Terraform remote state (imperative, run once):
@@ -7,30 +17,38 @@
    RESOURCE_GROUP=n3t-tfstate-rg STORAGE_ACCOUNT=n3ttfstate0001 \
      ./infra/terraform/bootstrap/create-state-backend.sh
    ```
-2. Create a service principal for CI and grant it `Contributor` on the
-   subscription (or the target resource group) plus `Key Vault
-   Administrator`/`Storage Blob Data Contributor` as needed:
+2. Create a GitHub repo and push this repo to it as a mirror (Toptal git
+   stays the canonical source; GitHub only runs the pipeline):
    ```bash
-   az ad sp create-for-rbac --name n3t-ci --role Contributor \
-     --scopes /subscriptions/<sub-id>
+   git remote add github git@github.com:<you>/node-3tier-app2.git
+   git push github main
    ```
-3. In git.toptal.com → Settings → CI/CD → Variables, set (masked/protected):
-   `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`,
-   `TF_BACKEND_RG`, `TF_BACKEND_SA`, `ACR_NAME`, `ACR_LOGIN_SERVER`,
-   `ADMIN_SSH_PUBLIC_KEY`, `BACKUP_STORAGE_ACCOUNT_NAME`, `RESOURCE_GROUP`,
-   `NAME_PREFIX`, `DB_HOST`, `DB_USER`, `DB_NAME`, `DB_PASSWORD_SECRET_URI`.
+3. Set up Azure AD federated credentials (OIDC) for GitHub Actions on an
+   app registration, scoped to `repo:<you>/node-3tier-app2:environment:production`
+   and `repo:<you>/node-3tier-app2:ref:refs/heads/main` — this avoids
+   storing a long-lived client secret. Grant that app's service principal
+   `Contributor` on the subscription/resource group.
+4. In the GitHub repo → Settings → Secrets and variables → Actions:
+   - **Secrets**: `ARM_CLIENT_ID`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`,
+     `ADMIN_SSH_PUBLIC_KEY`
+   - **Variables**: `TF_BACKEND_RG`, `TF_BACKEND_SA`, `ACR_NAME`,
+     `ACR_LOGIN_SERVER`, `BACKUP_STORAGE_ACCOUNT_NAME`, `RESOURCE_GROUP`,
+     `NAME_PREFIX`, `DB_HOST`, `DB_USER`, `DB_NAME`, `DB_PASSWORD_SECRET_URI`
    (Most of these are Terraform outputs after the first apply — see
    `terraform output` in `infra/terraform/environments/prod`.)
-4. In git.toptal.com → CI/CD → Schedules, add a **daily** schedule targeting
-   the default branch so the `backup:database` job runs.
+5. Settings → Environments → create `production` with **required
+   reviewers** — this is the manual approval gate on `terraform apply`.
+6. `.github/workflows/backup.yml` already runs on a daily cron
+   (`0 3 * * *`); no extra setup needed beyond the secrets/variables above.
 
 ## Deploying
 
-Push to the default branch: tests run automatically, images build and push
-to ACR automatically, `terraform plan` runs automatically, and `apply` waits
-for manual approval in the pipeline (see `docs/architecture.md` for why
-apply is a manual gate). Approving `apply` is the entire deploy — the
-image-tag change alone triggers a zero-downtime rolling update.
+Push to `main` (on the GitHub mirror): tests run automatically, images
+build and push to ACR automatically, `terraform plan` runs automatically,
+and `apply` waits for a reviewer to approve the `production` environment
+(see `docs/architecture.md` for why apply is a manual gate). Approving
+`apply` is the entire deploy — the image-tag change alone triggers a
+zero-downtime rolling update.
 
 ## Runtime handling scripts (`infra/scripts/runtime/`)
 
@@ -52,8 +70,9 @@ export RESOURCE_GROUP=n3t-prod-rg NAME_PREFIX=n3t-prod
   script involved (configured in Terraform, `backup_retention_days = 14`,
   geo-redundant). Point-in-time restore via `az postgres flexible-server
   restore`.
-- **Supplementary logical export**: `trigger-daily-backup.sh` runs from CI
-  daily (see schedule above) and calls `pg-dump-and-upload.sh` on a single
+- **Supplementary logical export**: `trigger-daily-backup.sh` runs from
+  `.github/workflows/backup.yml` daily (see schedule above) and calls
+  `pg-dump-and-upload.sh` on a single
   API instance via `az vmss run-command invoke`, uploading a compressed
   `pg_dump` to the `db-backups` blob container. To run it manually:
   ```bash

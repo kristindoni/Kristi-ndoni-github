@@ -22,7 +22,8 @@ web <=> api <=> db
 
 ```
 web/, api/          the application (forked base), + Dockerfile per tier, + tests
-.gitlab-ci.yml       CI/CD pipeline: test -> build & push to ACR -> terraform plan -> apply
+.github/workflows/   CI/CD pipeline (runs on GitHub Actions - see docs/runbook.md for why):
+                     test -> build & push to ACR -> terraform plan -> apply, + a daily backup workflow
 infra/terraform/     all infrastructure as code
   modules/           network, acr, keyvault, database, vmss, appgateway, monitoring, cdn, storage-backup
   environments/prod/ root module wiring the above together
@@ -38,4 +39,6 @@ docs/                architecture + runbook
 Azure · Terraform · VM Scale Sets + Docker + Azure Container Registry ·
 Application Gateway v2 (WAF) · PostgreSQL Flexible Server (private,
 zone-redundant HA) · Azure Front Door (CDN) · Log Analytics/Azure Monitor ·
-GitLab CI.
+GitHub Actions (pipeline code lives here in Toptal git; it executes against
+a GitHub mirror since git.toptal.com has no active runners — see
+docs/runbook.md).

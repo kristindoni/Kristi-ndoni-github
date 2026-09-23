@@ -68,8 +68,8 @@ flowchart TB
 | Fully provisioned via IaC | All resources (network, ACR, Key Vault, VMSS ×2, App Gateway, Postgres, Log Analytics, Front Door, Storage) are Terraform (`infra/terraform`), organized as reusable modules + one `environments/prod` root. |
 | Handles server/instance failures | VMSS spans 3 Availability Zones with `zone_balance = true`; `automatic_instance_repair` replaces any instance that fails its health probe; autoscale keeps a **minimum instance floor** so a failure always gets backfilled, not just detected. Postgres runs **zone-redundant HA** with an automatic-failover standby. |
 | Zero-downtime updates | Both VMSS use `upgrade_mode = "Rolling"` with a batched `rolling_upgrade_policy`, gated by the `ApplicationHealthLinux` extension against each container's health endpoint — Terraform apply (new image tag) triggers this automatically, no manual "instance refresh" step. |
-| Fully automated deploys (+ tests) | GitLab CI (`.gitlab-ci.yml`): test → build & push to ACR (tag = git SHA) → `terraform plan` → `terraform apply` (updates the VMSS image tag, which the Rolling policy rolls out). Unit/integration tests run for both tiers on every push (API tests run against a real Postgres service container). |
-| Backups at least daily | Postgres Flexible Server **automated backups** (`backup_retention_days = 14`, geo-redundant) are always-on, config-only. As a supplementary, portable export, a scheduled GitLab CI pipeline (`infra/scripts/backup/trigger-daily-backup.sh`) runs `pg_dump` on a single API instance (via `az vmss run-command`, no VNet access needed from the runner) and uploads the compressed dump to a geo-redundant Storage Account with lifecycle tiering. |
+| Fully automated deploys (+ tests) | GitHub Actions (`.github/workflows/ci-cd.yml`, committed here in Toptal git and executed against a GitHub mirror — git.toptal.com has no active runners, see `docs/runbook.md`): test → build & push to ACR (tag = git SHA) → `terraform plan` → `terraform apply` (updates the VMSS image tag, which the Rolling policy rolls out). Unit/integration tests run for both tiers on every push (API tests run against a real Postgres service container). |
+| Backups at least daily | Postgres Flexible Server **automated backups** (`backup_retention_days = 14`, geo-redundant) are always-on, config-only. As a supplementary, portable export, a scheduled GitHub Actions workflow (`.github/workflows/backup.yml`, daily cron) runs `infra/scripts/backup/trigger-daily-backup.sh`, which runs `pg_dump` on a single API instance (via `az vmss run-command`, no VNet access needed from the runner) and uploads the compressed dump to a geo-redundant Storage Account with lifecycle tiering. |
 | Logs accessible off-host | Every VMSS instance runs the `AzureMonitorLinuxAgent` extension shipping syslog/container (journald) logs to a central **Log Analytics workspace** via a Data Collection Rule; App Gateway and Postgres diagnostic logs go to the same workspace. Nothing is queried by SSH-ing into a host. |
 | Historical metrics / bottleneck spotting | Log Analytics + Azure Monitor metrics (CPU, App Gateway request/latency/unhealthy-host-count, Postgres metrics) with 90-day retention, queryable via KQL/Workbooks; a metric alert fires on unhealthy backend hosts. |
 | CDN, geo-distributed | Azure Front Door (Standard) fronts the Application Gateway: static assets (`/images/*`, `/stylesheets/*`) are cached and served from the edge PoP nearest each client; dynamic HTML/API responses bypass the cache and always hit origin. |
@@ -96,10 +96,12 @@ give:
 - **TLS**: the Application Gateway listener is HTTP-only for this exercise.
   Production would add an HTTPS listener with a certificate from Key Vault
   and enforce `https_redirect_enabled`.
-- **CI trust model**: the pipeline authenticates to Azure via a service
-  principal client secret (`ARM_CLIENT_ID`/`ARM_CLIENT_SECRET`); GitLab
-  supports OIDC federation with Azure workload identity, which would remove
-  the long-lived secret.
+- **CI runner**: git.toptal.com has no active runners for this project, so
+  the pipeline executes on GitHub Actions against a mirror, while the
+  workflow code stays committed here per the task's own allowance for this
+  situation. The workflows authenticate to Azure via OIDC federation
+  (`azure/login` + a federated credential on the app registration), no
+  long-lived client secret stored in either git provider.
 - **`terraform apply` is a manual CI gate** (approve after reviewing the
   plan) rather than fully unattended, since unattended infrastructure
   changes are a different risk profile than unattended *application*
