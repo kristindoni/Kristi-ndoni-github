@@ -12,7 +12,11 @@ resource "azurerm_public_ip" "appgw" {
   allocation_method   = "Static"
   sku                 = "Standard"
   zones               = ["1", "2", "3"]
-  tags                = var.tags
+  # Free Azure-provided hostname (<label>.<region>.cloudapp.azure.com) - a
+  # bare IP can never get a valid TLS cert, and isn't durable/brandable.
+  # A custom domain would CNAME onto this same FQDN.
+  domain_name_label = var.dns_label
+  tags               = var.tags
 }
 
 resource "azurerm_web_application_firewall_policy" "this" {

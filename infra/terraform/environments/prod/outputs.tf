@@ -4,7 +4,10 @@ output "resource_group_name" {
 
 output "app_public_url" {
   description = "Public entry point (Application Gateway). The CDN endpoint below is the client-facing, geo-distributed URL."
-  value       = "http://${module.appgateway.public_ip_address}"
+  # coalesce() guards against a plan-time null: the provider doesn't always
+  # mark fqdn as "known after apply" when only domain_name_label changes on
+  # an existing public IP.
+  value = "http://${coalesce(module.appgateway.public_fqdn, module.appgateway.public_ip_address)}"
 }
 
 output "cdn_endpoint_hostname" {

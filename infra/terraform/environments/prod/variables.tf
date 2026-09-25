@@ -42,6 +42,11 @@ variable "api_instances" {
   default = 2
 }
 
+variable "dns_label" {
+  description = "DNS label for the public app endpoint (<label>.<region>.cloudapp.azure.com), globally unique per region."
+  type        = string
+}
+
 variable "enable_cdn" {
   description = "Azure Front Door is rejected on Free Trial/Student subscriptions; set true on a standard subscription."
   type        = bool

@@ -58,6 +58,7 @@ module "appgateway" {
   location            = azurerm_resource_group.this.location
   resource_group_name = azurerm_resource_group.this.name
   subnet_id           = module.network.appgw_subnet_id
+  dns_label           = var.dns_label
   tags                = var.tags
 }
 

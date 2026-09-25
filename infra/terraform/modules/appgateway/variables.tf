@@ -19,6 +19,11 @@ variable "container_port" {
   default = 3000
 }
 
+variable "dns_label" {
+  description = "DNS label for the public IP (<label>.<region>.cloudapp.azure.com), must be globally unique in the region."
+  type        = string
+}
+
 variable "internal_frontend_ip" {
   description = "Static private IP for the internal listener, must fall inside the appgw subnet CIDR."
   type        = string
