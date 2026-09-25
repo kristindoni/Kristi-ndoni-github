@@ -10,7 +10,17 @@ router.get('/', function(req, res, next) {
     request({
             method: 'GET',
             url: api_url,
-            json: true
+            json: true,
+            headers: {
+                // The api call is routed through the same WAF-protected
+                // Application Gateway as public traffic (via its internal
+                // frontend). OWASP CRS flags a missing User-Agent and a
+                // numeric-IP Host header as anomalous - both true by
+                // default for a bare server-to-server call by IP. Set them
+                // explicitly rather than weakening the WAF for everyone.
+                'User-Agent': 'node-3tier-app2-web/1.0',
+                'Host': 'api.internal.n3t-prod.local'
+            }
         },
         function(error, response, body) {
             if (error || response.statusCode !== 200) {
