@@ -55,8 +55,12 @@ resource "azurerm_storage_management_policy" "lifecycle" {
 }
 
 resource "azurerm_role_assignment" "writers" {
-  for_each             = toset(var.principal_ids_with_write_access)
+  # count (not for_each/toset) because the principal IDs themselves (e.g. a
+  # VMSS's managed identity) are only known after apply - for_each requires
+  # its keys to be known at plan time, but count only needs the length of
+  # the list, which is static.
+  count                = length(var.principal_ids_with_write_access)
   scope                = azurerm_storage_account.backups.id
   role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = each.value
+  principal_id         = var.principal_ids_with_write_access[count.index]
 }

@@ -113,7 +113,10 @@ resource "azurerm_role_assignment" "acr_pull" {
 }
 
 resource "azurerm_role_assignment" "kv_secrets_user" {
-  count                = var.key_vault_id != "" ? 1 : 0
+  # Gated on the explicit enable_key_vault_access bool (known at plan time),
+  # not on key_vault_id != "" - key_vault_id's value (a Key Vault resource
+  # ID) is only known after apply, which would make count itself unknown.
+  count                = var.enable_key_vault_access ? 1 : 0
   scope                = var.key_vault_id
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_linux_virtual_machine_scale_set.this.identity[0].principal_id

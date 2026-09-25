@@ -90,8 +90,14 @@ variable "db_password_secret_uri" {
   default     = ""
 }
 
+variable "enable_key_vault_access" {
+  description = "Whether to grant this tier's managed identity Key Vault Secrets User on key_vault_id. Must be a literal true/false from the caller (not derived from key_vault_id, which is only known after apply)."
+  type        = bool
+  default     = false
+}
+
 variable "key_vault_id" {
-  description = "Key Vault ID to grant this tier's identity read access to, if db_password_secret_uri is set."
+  description = "Key Vault ID to grant this tier's identity read access to, if enable_key_vault_access is true."
   type        = string
   default     = ""
 }

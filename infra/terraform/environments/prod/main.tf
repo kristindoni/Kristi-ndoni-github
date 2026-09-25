@@ -130,6 +130,7 @@ module "vmss_api" {
     DBPORT = "5432"
   }
   db_password_secret_uri     = "${module.keyvault.vault_uri}secrets/db-admin-password"
+  enable_key_vault_access    = true
   key_vault_id               = module.keyvault.id
   backend_address_pool_ids   = [module.appgateway.api_backend_pool_id]
   log_analytics_workspace_id = module.monitoring.workspace_id
