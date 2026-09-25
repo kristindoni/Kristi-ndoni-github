@@ -6,8 +6,9 @@ resource "azurerm_postgresql_flexible_server" "this" {
   resource_group_name = var.resource_group_name
   location            = var.location
 
-  delegated_subnet_id = var.db_subnet_id
-  private_dns_zone_id = var.private_dns_zone_id
+  delegated_subnet_id          = var.db_subnet_id
+  private_dns_zone_id          = var.private_dns_zone_id
+  public_network_access_enabled = false
 
   administrator_login    = var.admin_login
   administrator_password = var.admin_password
