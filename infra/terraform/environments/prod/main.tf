@@ -26,7 +26,11 @@ module "acr" {
 
 module "keyvault" {
   source              = "../../modules/keyvault"
-  vault_name          = "${var.name_prefix}-kv"
+  # Purge protection means a destroyed vault's name stays reserved for the
+  # full soft-delete retention window (30d) even in another region - keep
+  # this name unique per deploy attempt rather than colliding with a
+  # previous, now-unpurgeable soft-deleted vault.
+  vault_name          = "${var.name_prefix}-kv2"
   resource_group_name = azurerm_resource_group.this.name
   location            = azurerm_resource_group.this.location
   # NOTE: the api VMSS's own read access is granted by module.vmss_api
@@ -42,9 +46,10 @@ module "database" {
   location            = azurerm_resource_group.this.location
   db_subnet_id        = module.network.db_subnet_id
   private_dns_zone_id = module.network.postgres_private_dns_zone_id
-  admin_login         = local.db_admin_login
-  admin_password      = module.keyvault.db_admin_password
-  tags                = var.tags
+  admin_login              = local.db_admin_login
+  admin_password           = module.keyvault.db_admin_password
+  enable_high_availability = var.enable_postgres_ha
+  tags                     = var.tags
 }
 
 module "appgateway" {
@@ -75,7 +80,12 @@ module "backup_storage" {
   tags                            = var.tags
 }
 
+# Azure Front Door is rejected outright on Free Trial/Student subscriptions
+# ("Free Trial and Student account is forbidden for Azure Frontdoor
+# resources"), independent of anything in this config. Gated behind a
+# variable so it deploys unmodified on a standard subscription.
 module "cdn" {
+  count               = var.enable_cdn ? 1 : 0
   source              = "../../modules/cdn"
   name_prefix         = var.name_prefix
   resource_group_name = azurerm_resource_group.this.name
@@ -90,6 +100,7 @@ module "vmss_web" {
   location             = azurerm_resource_group.this.location
   resource_group_name  = azurerm_resource_group.this.name
   subnet_id            = module.network.web_subnet_id
+  sku                  = var.vm_sku
   instances            = var.web_instances
   min_instances        = var.web_instances
   admin_ssh_public_key = var.admin_ssh_public_key
@@ -101,7 +112,9 @@ module "vmss_web" {
     PORT = "3000"
     # Reaches the api tier over the VNet via the Application Gateway's
     # private frontend IP + the same /api/* path rule used publicly.
-    API_HOST = "http://${module.appgateway.internal_ip_address}/api"
+    # web/routes/index.js does `API_HOST + '/api/status'` itself - no /api
+    # suffix here, or the path doubles to /api/api/status.
+    API_HOST = "http://${module.appgateway.internal_ip_address}"
   }
   backend_address_pool_ids   = [module.appgateway.web_backend_pool_id]
   log_analytics_workspace_id = module.monitoring.workspace_id
@@ -115,6 +128,7 @@ module "vmss_api" {
   location             = azurerm_resource_group.this.location
   resource_group_name  = azurerm_resource_group.this.name
   subnet_id            = module.network.api_subnet_id
+  sku                  = var.vm_sku
   instances            = var.api_instances
   min_instances        = var.api_instances
   admin_ssh_public_key = var.admin_ssh_public_key

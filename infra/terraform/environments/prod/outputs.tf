@@ -8,7 +8,7 @@ output "app_public_url" {
 }
 
 output "cdn_endpoint_hostname" {
-  value = module.cdn.endpoint_hostname
+  value = var.enable_cdn ? module.cdn[0].endpoint_hostname : "CDN disabled (enable_cdn = false)"
 }
 
 output "acr_login_server" {

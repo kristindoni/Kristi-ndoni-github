@@ -26,6 +26,12 @@ variable "api_image_tag" {
   default     = "latest"
 }
 
+variable "vm_sku" {
+  description = "VM size for both tiers' VMSS. Defaults to a real-world size; override for subscriptions with tight regional vCPU quota (e.g. trial accounts)."
+  type        = string
+  default     = "Standard_B2s"
+}
+
 variable "web_instances" {
   type    = number
   default = 2
@@ -34,6 +40,18 @@ variable "web_instances" {
 variable "api_instances" {
   type    = number
   default = 2
+}
+
+variable "enable_cdn" {
+  description = "Azure Front Door is rejected on Free Trial/Student subscriptions; set true on a standard subscription."
+  type        = bool
+  default     = true
+}
+
+variable "enable_postgres_ha" {
+  description = "Zone-redundant HA for Postgres Flexible Server. Not available in every region/subscription tier (MultiAzHaIsOfferRestricted); set true where supported."
+  type        = bool
+  default     = true
 }
 
 variable "backup_storage_account_name" {
