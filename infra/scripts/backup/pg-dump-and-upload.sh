@@ -21,9 +21,20 @@ DB_PASSWORD_SECRET_URI="${4:?DB_PASSWORD_SECRET_URI required}"
 STORAGE_ACCOUNT="${5:?STORAGE_ACCOUNT required}"
 STORAGE_CONTAINER="${6:?STORAGE_CONTAINER required}"
 
-command -v pg_dump >/dev/null 2>&1 || {
-  apt-get update -y && apt-get install -y --no-install-recommends postgresql-client
-}
+# The Ubuntu 22.04 default repo only ships postgresql-client 14, but the
+# server runs Postgres 15 - pg_dump refuses to talk to a newer server than
+# itself. Pull the matching client from the official PGDG repo instead.
+if ! pg_dump --version 2>/dev/null | grep -q ' 15\.'; then
+  apt-get update -y
+  apt-get install -y --no-install-recommends curl ca-certificates gnupg lsb-release
+  install -d /usr/share/postgresql-common/pgdg
+  curl -sf -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    https://www.postgresql.org/media/keys/ACCC4CF8.asc
+  echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list
+  apt-get update -y
+  apt-get install -y --no-install-recommends postgresql-client-15
+fi
 
 imds_token() {
   # $1 = resource URI to request a token for
