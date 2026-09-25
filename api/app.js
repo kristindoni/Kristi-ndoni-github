@@ -8,7 +8,12 @@ const conString = {
     database: process.env.DB,
     password: process.env.DBPASS,
     host: process.env.DBHOST,
-    port: process.env.DBPORT                
+    port: process.env.DBPORT,
+    // Azure Database for PostgreSQL Flexible Server requires SSL by default
+    // and refuses plaintext connections. rejectUnauthorized:false skips
+    // strict CA validation for simplicity here; production would instead
+    // bundle Azure's CA bundle and validate against it.
+    ssl: { rejectUnauthorized: false }
 };
 
 // Routes
