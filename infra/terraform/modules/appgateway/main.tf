@@ -45,6 +45,13 @@ resource "azurerm_application_gateway" "this" {
     tier = "WAF_v2"
   }
 
+  # The provider's implicit default TLS policy (AppGwSslPolicy20150501) is
+  # now rejected by Azure as deprecated - pin an explicit modern policy.
+  ssl_policy {
+    policy_type = "Predefined"
+    policy_name = "AppGwSslPolicy20220101"
+  }
+
   # Scales the gateway itself out under load; separate from VMSS autoscale.
   autoscale_configuration {
     min_capacity = 2
@@ -65,10 +72,13 @@ resource "azurerm_application_gateway" "this" {
 
   # Private frontend so the web tier can reach the api tier over the VNet
   # instead of hairpinning back out through the public internet/WAF.
+  # WAF_v2/Standard_v2 requires Static allocation for a private frontend IP
+  # (Dynamic is rejected), which in turn requires an explicit address.
   frontend_ip_configuration {
     name                          = "appgw-internal-ip"
     subnet_id                     = var.subnet_id
-    private_ip_address_allocation = "Dynamic"
+    private_ip_address_allocation = "Static"
+    private_ip_address            = var.internal_frontend_ip
   }
 
   frontend_port {
