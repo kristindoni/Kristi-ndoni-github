@@ -1,10 +1,10 @@
 # Architecture: node-3tier-app2 on Azure
 
-This document is the architecture diagram/deck substitute referenced in the
-task ("An architectural diagram / PPT to explain your architecture during
-the interview"). It's kept as versioned markdown + a Mermaid diagram
-(renders natively on git.toptal.com and GitHub) rather than a binary
-slide deck, so it stays in sync with the actual Terraform.
+This is the architecture write-up the task asks for ("An architectural
+diagram / PPT to explain your architecture during the interview"). I kept
+it as markdown with a Mermaid diagram instead of a slide deck, mostly
+because it's easier to keep it in sync with the actual Terraform as things
+change, and it renders fine on both git.toptal.com and GitHub.
 
 ## Diagram
 
@@ -59,50 +59,79 @@ flowchart TB
     ApiVMSS -. "daily pg_dump export (managed identity, triggered by CI)" .-> BackupStorage
 ```
 
+This diagram is the "as designed" version. The actual deployed
+environment for the interview runs a couple of things differently for
+reasons that have nothing to do with the design, see the note at the
+bottom.
+
 ## How each requirement is met
 
 | Requirement | Implementation |
 |---|---|
-| Web and API tiers exposed to the internet | Single Application Gateway v2 (public IP) with **path-based routing**: `/api/*` → API backend pool, `/*` → web backend pool. Both tiers are internet-reachable; only one public IP/WAF policy to manage. |
-| DB tier not accessible from the internet | PostgreSQL Flexible Server is **VNet-integrated with no public network access at all** (`delegated_subnet_id`), in a dedicated subnet whose NSG has **no internet-facing inbound rule** and only allows TCP 5432 from the API subnet. |
-| Fully provisioned via IaC | All resources (network, ACR, Key Vault, VMSS ×2, App Gateway, Postgres, Log Analytics, Front Door, Storage) are Terraform (`infra/terraform`), organized as reusable modules + one `environments/prod` root. |
-| Handles server/instance failures | VMSS spans 3 Availability Zones with `zone_balance = true`; `automatic_instance_repair` replaces any instance that fails its health probe; autoscale keeps a **minimum instance floor** so a failure always gets backfilled, not just detected. Postgres runs **zone-redundant HA** with an automatic-failover standby. |
-| Zero-downtime updates | Both VMSS use `upgrade_mode = "Rolling"` with a batched `rolling_upgrade_policy`, gated by the `ApplicationHealthLinux` extension against each container's health endpoint — Terraform apply (new image tag) triggers this automatically, no manual "instance refresh" step. |
-| Fully automated deploys (+ tests) | GitHub Actions (`.github/workflows/ci-cd.yml`, committed here in Toptal git and executed against a GitHub mirror — git.toptal.com has no active runners, see `docs/runbook.md`): test → build & push to ACR (tag = git SHA) → `terraform plan` → `terraform apply` (updates the VMSS image tag, which the Rolling policy rolls out). Unit/integration tests run for both tiers on every push (API tests run against a real Postgres service container). |
-| Backups at least daily | Postgres Flexible Server **automated backups** (`backup_retention_days = 14`, geo-redundant) are always-on, config-only. As a supplementary, portable export, a scheduled GitHub Actions workflow (`.github/workflows/backup.yml`, daily cron) runs `infra/scripts/backup/trigger-daily-backup.sh`, which runs `pg_dump` on a single API instance (via `az vmss run-command`, no VNet access needed from the runner) and uploads the compressed dump to a geo-redundant Storage Account with lifecycle tiering. |
-| Logs accessible off-host | Every VMSS instance runs the `AzureMonitorLinuxAgent` extension shipping syslog/container (journald) logs to a central **Log Analytics workspace** via a Data Collection Rule; App Gateway and Postgres diagnostic logs go to the same workspace. Nothing is queried by SSH-ing into a host. |
-| Historical metrics / bottleneck spotting | Log Analytics + Azure Monitor metrics (CPU, App Gateway request/latency/unhealthy-host-count, Postgres metrics) with 90-day retention, queryable via KQL/Workbooks; a metric alert fires on unhealthy backend hosts. |
-| CDN, geo-distributed | Azure Front Door (Standard) fronts the Application Gateway: static assets (`/images/*`, `/stylesheets/*`) are cached and served from the edge PoP nearest each client; dynamic HTML/API responses bypass the cache and always hit origin. |
-| Deployable on a major cloud provider | Azure, chosen deliberately. |
+| Web and API tiers exposed to the internet | One Application Gateway v2 with a public IP, doing path-based routing: `/api/*` goes to the API backend pool, everything else goes to web. Both tiers are reachable from the internet through it, and there's only one public IP/WAF policy to manage instead of two. |
+| DB tier not accessible from the internet | Postgres Flexible Server is VNet-integrated with public network access turned off entirely (`delegated_subnet_id` + `public_network_access_enabled = false`), sitting in its own subnet whose NSG has no internet-facing inbound rule at all, only TCP 5432 from the API subnet. |
+| Fully provisioned via IaC | Everything (network, ACR, Key Vault, both VMSS, App Gateway, Postgres, Log Analytics, Front Door, Storage) is Terraform, split into modules under `infra/terraform/modules` with one `environments/prod` root wiring them together. |
+| Handles server/instance failures | VMSS spreads instances across 3 Availability Zones, `automatic_instance_repair` replaces anything that fails its health probe, and autoscale keeps a minimum instance floor so a lost instance gets backfilled rather than just noticed. Postgres supports zone-redundant HA with an automatic-failover standby (see the note below on why it's off in the current deployment). |
+| Zero-downtime updates | Both VMSS run `upgrade_mode = "Rolling"` with a batched rolling upgrade policy, gated by an `ApplicationHealthLinux` extension checking each container's health endpoint. A `terraform apply` with a new image tag triggers this automatically, no separate "start an instance refresh" step. |
+| Fully automated deploys, plus tests | GitHub Actions (`.github/workflows/ci-cd.yml`): test, build and push to ACR tagged with the git SHA, `terraform plan`, then `terraform apply`, which bumps the VMSS image tag and lets the rolling policy roll it out. Both tiers have real tests that run on every push, the API tests run against an actual Postgres service container rather than mocks. |
+| Backups at least daily | Postgres's own automated backups (`backup_retention_days = 14`, geo-redundant) are always on and need no script at all. On top of that, a daily GitHub Actions workflow runs `pg_dump` on one API instance via `az vmss run-command` (so the runner never needs network access to the private DB) and uploads the compressed dump to a geo-redundant storage account with lifecycle tiering. |
+| Logs accessible off-host | Every VMSS instance runs the AzureMonitorLinuxAgent extension, shipping syslog and container logs to a central Log Analytics workspace. App Gateway and Postgres diagnostics land in the same workspace. You never need to SSH into a host to read a log. |
+| Historical metrics, spotting bottlenecks | Log Analytics plus Azure Monitor metrics (CPU, App Gateway latency/unhealthy-host-count, Postgres metrics) with 90 days of retention, queryable via KQL, with an alert on unhealthy backend hosts. |
+| CDN, distributed by client location | Azure Front Door in front of the Application Gateway, caching static assets (`/images/*`, `/stylesheets/*`) at the edge closest to each client while dynamic HTML/API responses always go straight to origin. |
+| Deployable on a major cloud provider | Azure. |
 
-## Compute model: why VMSS + Docker + ACR, not AKS/Container Apps
+## Why VMSS + Docker + ACR instead of AKS or Container Apps
 
-The app isn't containerized upstream and the task explicitly calls for
-"runtime handling scripts (start/stop/scale nodes)" — language that implies
-VM-level operational control, which a fully managed platform like Container
-Apps/AKS abstracts away entirely (no "node" to start/stop). VM Scale Sets
-give:
+The app wasn't containerized to start with, and the task's own wording
+("runtime handling scripts: start/stop/scale nodes") points at VM-level
+control, which a managed platform like Container Apps or AKS mostly
+abstracts away, there's no real "node" to start or stop on those. VM
+Scale Sets give:
 
-- A genuine "node" to script against (`infra/scripts/runtime/{start,stop,scale}.sh`).
-- Native rolling, health-gated updates (no custom orchestration needed).
-- Docker without a custom VM image pipeline: the base image is static
-  (Ubuntu + Docker + Azure Monitor Agent, provisioned once via `custom_data`
-  cloud-init); only the **container image tag** changes per deploy, pulled
-  from ACR using the instance's managed identity (no registry credentials
-  stored anywhere).
+- An actual node to script against (`infra/scripts/runtime/{start,stop,scale}.sh`).
+- Rolling, health-gated updates built in, no orchestration to hand-roll.
+- Docker without needing a custom VM image pipeline: the base image
+  barely changes (Ubuntu + Docker + the monitoring agent, set up once via
+  `custom_data`), and only the container image tag changes per deploy,
+  pulled from ACR with the instance's managed identity so no registry
+  credentials live anywhere.
 
-## Known simplifications / what a longer engagement would add
+## What's actually running vs. what's designed
 
-- **TLS**: the Application Gateway listener is HTTP-only for this exercise.
-  Production would add an HTTPS listener with a certificate from Key Vault
-  and enforce `https_redirect_enabled`.
-- **CI runner**: git.toptal.com has no active runners for this project, so
-  the pipeline executes on GitHub Actions against a mirror, while the
-  workflow code stays committed here per the task's own allowance for this
-  situation. The workflows authenticate to Azure via OIDC federation
-  (`azure/login` + a federated credential on the app registration), no
-  long-lived client secret stored in either git provider.
-- **`terraform apply` is a manual CI gate** (approve after reviewing the
-  plan) rather than fully unattended, since unattended infrastructure
-  changes are a different risk profile than unattended *application*
-  deploys (which this pipeline does fully automate via the image tag).
+The Terraform supports the full design above. What's live right now
+differs in two places, both because of restrictions on the Azure
+subscription I deployed to for this interview, not the code:
+
+- **Postgres HA is off** (`enable_postgres_ha = false`). The subscription
+  hit `MultiAzHaIsOfferRestricted` in every region I tried, zone-redundant
+  HA just isn't offered on this tier. Flip the variable back to `true` on
+  a normal subscription and it works as designed.
+- **Front Door/CDN is off** (`enable_cdn = false`). Azure rejects it
+  outright on trial/student subscriptions ("Free Trial and Student
+  account is forbidden for Azure Frontdoor resources"). Same story, flip
+  `enable_cdn = true` on a standard subscription.
+
+Also worth flagging since it came up while deploying: the subscription's
+regional vCPU quota is 4 total, which ruled out the VM size I originally
+picked (`Standard_B2s`, 2 vCPU each, would have needed 8 across both
+tiers) and even smaller B-series sizes weren't available at all in some
+regions. The live deployment uses `Standard_F1as_v7` (1 vCPU) so 2 web +
+2 api instances fit inside the quota. `vm_sku` is a variable for exactly
+this reason.
+
+## Other things I'd change given more time
+
+- **TLS**: the Application Gateway listener is HTTP only right now.
+  Getting a real cert needs a hostname (which is why the public IP now
+  has a DNS label), then it's a Key Vault-backed listener cert plus
+  `https_redirect_enabled = true`.
+- **CI trust**: the pipeline authenticates to Azure over OIDC federation
+  rather than a stored client secret, but git.toptal.com has no active
+  runners for this project, so the pipeline actually executes on GitHub
+  Actions against a mirror of this repo. The workflow code itself still
+  lives here in Toptal git, only the execution moved, which the task
+  explicitly allows.
+- **`terraform apply` needs manual approval** in the pipeline rather than
+  running unattended. I think that's the right call, an unattended infra
+  change is a different risk than an unattended app deploy, and the app
+  deploy (the image tag bump) is what's actually fully automated here.
