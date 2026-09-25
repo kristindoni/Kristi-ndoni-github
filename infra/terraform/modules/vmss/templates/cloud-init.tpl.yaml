@@ -64,6 +64,12 @@ write_files:
       [Service]
       Type=oneshot
       RemainAfterExit=yes
+      # On a brand-new deploy, ACR may not have an image pushed yet
+      # (Terraform provisions the VMSS and ACR together) - retry instead of
+      # failing permanently so the instance self-heals once the image
+      # exists, with no reboot/reimage needed.
+      Restart=on-failure
+      RestartSec=15
       ExecStart=/usr/local/bin/run-app.sh
       ExecStop=/usr/bin/docker stop ${app_name}
 
