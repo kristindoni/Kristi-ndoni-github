@@ -30,9 +30,10 @@ module "keyvault" {
   # full soft-delete retention window (30d) even in another region - keep
   # this name unique per deploy attempt rather than colliding with a
   # previous, now-unpurgeable soft-deleted vault.
-  vault_name          = "${var.name_prefix}-kv2"
-  resource_group_name = azurerm_resource_group.this.name
-  location            = azurerm_resource_group.this.location
+  vault_name           = "${var.name_prefix}-kv2"
+  resource_group_name  = azurerm_resource_group.this.name
+  location             = azurerm_resource_group.this.location
+  admin_principal_ids  = var.keyvault_admin_principal_ids
   # NOTE: the api VMSS's own read access is granted by module.vmss_api
   # itself (key_vault_id input below) rather than wired here, to avoid a
   # keyvault <-> vmss_api circular module dependency.

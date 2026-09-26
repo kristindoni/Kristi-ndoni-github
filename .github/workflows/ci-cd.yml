@@ -120,7 +120,10 @@ jobs:
             -var "vm_sku=${{ vars.VM_SKU }}" \
             -var "enable_cdn=${{ vars.ENABLE_CDN }}" \
             -var "enable_postgres_ha=${{ vars.ENABLE_POSTGRES_HA }}" \
-            -var "tls_certificate_key_vault_secret_id=${{ vars.TLS_CERT_SECRET_ID }}"
+            -var "tls_certificate_key_vault_secret_id=${{ vars.TLS_CERT_SECRET_ID }}" \
+            -var "location=${{ vars.LOCATION }}" \
+            -var "name_prefix=${{ vars.NAME_PREFIX }}" \
+            -var "keyvault_admin_principal_ids=${{ vars.KEYVAULT_ADMIN_PRINCIPAL_IDS }}"
 
   apply:
     needs: [build, plan]
@@ -163,7 +166,10 @@ jobs:
             -var "vm_sku=${{ vars.VM_SKU }}" \
             -var "enable_cdn=${{ vars.ENABLE_CDN }}" \
             -var "enable_postgres_ha=${{ vars.ENABLE_POSTGRES_HA }}" \
-            -var "tls_certificate_key_vault_secret_id=${{ vars.TLS_CERT_SECRET_ID }}"
+            -var "tls_certificate_key_vault_secret_id=${{ vars.TLS_CERT_SECRET_ID }}" \
+            -var "location=${{ vars.LOCATION }}" \
+            -var "name_prefix=${{ vars.NAME_PREFIX }}" \
+            -var "keyvault_admin_principal_ids=${{ vars.KEYVAULT_ADMIN_PRINCIPAL_IDS }}"
           # upgrade_mode = "Rolling" on both VMSS means this apply alone
           # triggers a batched, health-probe-gated rolling replacement of
           # instances with the new image tag - zero downtime, no separate

@@ -12,11 +12,18 @@ resource "azurerm_key_vault" "this" {
   tags                       = var.tags
 }
 
-# CI/operator identity gets secret management rights.
+# Explicit list of trusted operator/CI identities, NOT
+# data.azurerm_client_config.current.object_id ("whoever happens to be
+# running terraform right now"). That looked convenient with a single
+# operator, but breaks the moment a second identity (e.g. a CI service
+# principal) also needs to run terraform: it would try to swap this role
+# assignment to the new principal, which needs Key Vault read access to
+# even plan the swap - a real chicken-and-egg we hit switching to CI.
 resource "azurerm_role_assignment" "admin" {
+  for_each             = toset(var.admin_principal_ids)
   scope                = azurerm_key_vault.this.id
   role_definition_name = "Key Vault Administrator"
-  principal_id         = data.azurerm_client_config.current.object_id
+  principal_id         = each.value
 }
 
 # Any VMSS/managed identities that need read access to secrets at runtime.

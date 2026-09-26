@@ -48,6 +48,11 @@ variable "tls_certificate_key_vault_secret_id" {
   default     = ""
 }
 
+variable "keyvault_admin_principal_ids" {
+  description = "Object IDs of every identity (operators + CI service principals) that needs Key Vault Administrator on the vault. Must be explicit - see keyvault module for why."
+  type        = list(string)
+}
+
 variable "dns_label" {
   description = "DNS label for the public app endpoint (<label>.<region>.cloudapp.azure.com), globally unique per region."
   type        = string
