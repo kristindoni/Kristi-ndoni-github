@@ -115,7 +115,12 @@ jobs:
             -var "web_image_tag=${{ github.sha }}" \
             -var "api_image_tag=${{ github.sha }}" \
             -var "admin_ssh_public_key=${{ secrets.ADMIN_SSH_PUBLIC_KEY }}" \
-            -var "backup_storage_account_name=${{ vars.BACKUP_STORAGE_ACCOUNT_NAME }}"
+            -var "backup_storage_account_name=${{ vars.BACKUP_STORAGE_ACCOUNT_NAME }}" \
+            -var "dns_label=${{ vars.DNS_LABEL }}" \
+            -var "vm_sku=${{ vars.VM_SKU }}" \
+            -var "enable_cdn=${{ vars.ENABLE_CDN }}" \
+            -var "enable_postgres_ha=${{ vars.ENABLE_POSTGRES_HA }}" \
+            -var "tls_certificate_key_vault_secret_id=${{ vars.TLS_CERT_SECRET_ID }}"
 
   apply:
     needs: [build, plan]
@@ -153,7 +158,12 @@ jobs:
             -var "web_image_tag=${{ github.sha }}" \
             -var "api_image_tag=${{ github.sha }}" \
             -var "admin_ssh_public_key=${{ secrets.ADMIN_SSH_PUBLIC_KEY }}" \
-            -var "backup_storage_account_name=${{ vars.BACKUP_STORAGE_ACCOUNT_NAME }}"
+            -var "backup_storage_account_name=${{ vars.BACKUP_STORAGE_ACCOUNT_NAME }}" \
+            -var "dns_label=${{ vars.DNS_LABEL }}" \
+            -var "vm_sku=${{ vars.VM_SKU }}" \
+            -var "enable_cdn=${{ vars.ENABLE_CDN }}" \
+            -var "enable_postgres_ha=${{ vars.ENABLE_POSTGRES_HA }}" \
+            -var "tls_certificate_key_vault_secret_id=${{ vars.TLS_CERT_SECRET_ID }}"
           # upgrade_mode = "Rolling" on both VMSS means this apply alone
           # triggers a batched, health-probe-gated rolling replacement of
           # instances with the new image tag - zero downtime, no separate
