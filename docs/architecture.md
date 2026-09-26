@@ -119,12 +119,31 @@ regions. The live deployment uses `Standard_F1as_v7` (1 vCPU) so 2 web +
 2 api instances fit inside the quota. `vm_sku` is a variable for exactly
 this reason.
 
+## TLS
+
+The Application Gateway has a real HTTPS listener with a Let's Encrypt
+certificate (that's what the DNS label on the public IP is for, Let's
+Encrypt needs a real hostname to issue against, not a bare IP). The cert
+is stored in Key Vault and the gateway reads it through a user-assigned
+managed identity, no private key sitting in Terraform state or anywhere
+else. Plain HTTP redirects to HTTPS for everything except
+`/.well-known/acme-challenge/*`, which stays on HTTP on purpose so future
+renewals keep working.
+
+It's turned on via `tls_certificate_key_vault_secret_id` on the
+`appgateway` module, empty string means HTTP only, so the module still
+works standalone before a certificate exists.
+
+One thing not automated: renewal. The cert was issued once by hand
+(certbot in manual mode, with a hook script that drops the challenge
+file straight into the running web container via `az vmss run-command`)
+and expires in 90 days. Automating that would mean either a scheduled
+job with the same hook approach, or switching to DNS-01 challenges if the
+domain ever moves off `*.cloudapp.azure.com` to something with DNS I
+actually control.
+
 ## Other things I'd change given more time
 
-- **TLS**: the Application Gateway listener is HTTP only right now.
-  Getting a real cert needs a hostname (which is why the public IP now
-  has a DNS label), then it's a Key Vault-backed listener cert plus
-  `https_redirect_enabled = true`.
 - **CI trust**: the pipeline authenticates to Azure over OIDC federation
   rather than a stored client secret, but git.toptal.com has no active
   runners for this project, so the pipeline actually executes on GitHub
