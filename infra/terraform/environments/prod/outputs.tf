@@ -7,7 +7,7 @@ output "app_public_url" {
   # coalesce() guards against a plan-time null: the provider doesn't always
   # mark fqdn as "known after apply" when only domain_name_label changes on
   # an existing public IP.
-  value = "http://${coalesce(module.appgateway.public_fqdn, module.appgateway.public_ip_address)}"
+  value = "${var.tls_certificate_key_vault_secret_id != "" ? "https" : "http"}://${coalesce(module.appgateway.public_fqdn, module.appgateway.public_ip_address)}"
 }
 
 output "cdn_endpoint_hostname" {
