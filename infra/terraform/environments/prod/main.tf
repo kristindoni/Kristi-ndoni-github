@@ -59,7 +59,9 @@ module "appgateway" {
   resource_group_name = azurerm_resource_group.this.name
   subnet_id           = module.network.appgw_subnet_id
   dns_label           = var.dns_label
-  tags                = var.tags
+  tls_certificate_key_vault_secret_id = var.tls_certificate_key_vault_secret_id
+  tls_key_vault_id                    = module.keyvault.id
+  tags                                = var.tags
 }
 
 module "monitoring" {

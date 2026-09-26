@@ -42,6 +42,12 @@ variable "api_instances" {
   default = 2
 }
 
+variable "tls_certificate_key_vault_secret_id" {
+  description = "Versionless Key Vault secret ID for the App Gateway's TLS cert. Empty = HTTP only."
+  type        = string
+  default     = ""
+}
+
 variable "dns_label" {
   description = "DNS label for the public app endpoint (<label>.<region>.cloudapp.azure.com), globally unique per region."
   type        = string
