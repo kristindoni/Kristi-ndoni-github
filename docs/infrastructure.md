@@ -82,6 +82,28 @@ basically never touched again.
 6. `.github/workflows/backup.yml` runs on a daily cron (`0 3 * * *`),
    nothing else to set up for it beyond the secrets/variables above.
 
+## Destroying and recreating from scratch
+
+`terraform destroy` against `environments/prod` (never against `bootstrap`
+or `bootstrap-identity`, those are deliberately separate state so they
+survive this) followed by `terraform apply` rebuilds the whole stack, with
+two things worth knowing beforehand:
+
+- **Key Vault will come back with its existing secrets intact**, including
+  the manually-issued TLS certificate, as long as you recreate it with the
+  same name in the same region. The provider is configured with
+  `purge_soft_delete_on_destroy = false` and
+  `recover_soft_deleted_key_vaults = true`, so `terraform apply` recovers
+  the soft-deleted vault instead of failing or creating an empty one.
+  Change the region or the vault name and that recovery path doesn't
+  apply, you'd be back to reissuing the cert by hand.
+- **ACR has no soft-delete, a destroy wipes every pushed image.** Don't
+  follow a destroy with a bare local `terraform apply`, the VMSS
+  instances would come up with nothing to pull and just retry forever.
+  Recreate through the actual CI pipeline (push to `main`, or re-run the
+  workflow) instead, it always builds and pushes images before it
+  applies, so the image exists by the time the VMSS does.
+
 ## Deploying
 
 Push to `main` on the GitHub mirror:
