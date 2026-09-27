@@ -42,45 +42,102 @@ it would still need to exist independently of the thing it manages. So
 it's its own Terraform root with its own state file, applied once and
 basically never touched again.
 
-## One-time setup (already done for the live environment, documented for a fresh subscription)
+## One-time setup, from an empty subscription
 
-1. Bootstrap Terraform's remote state:
+This is the actual order things have to happen in, not just a list of
+pieces, a couple of these steps depend on the one before it.
+
+**Prerequisites**: Azure CLI, Terraform >= 1.5, Docker, logged in with
+`az login` and pointed at the right subscription
+(`az account set --subscription <id>`), and an SSH keypair you're willing
+to use for break-glass VM access.
+
+1. **Bootstrap Terraform's remote state.** This is the one piece that
+   can't be Terraform itself, see "Why a separate state for the CI
+   identity" above for the same chicken-and-egg reasoning applied to
+   state storage:
    ```bash
-   RESOURCE_GROUP=n3t-tfstate-rg STORAGE_ACCOUNT=n3ttfstate0001 \
+   RESOURCE_GROUP=n3t-tfstate-rg STORAGE_ACCOUNT=<globally-unique-name> LOCATION=<region> \
      ./infra/terraform/bootstrap/create-state-backend.sh
    ```
-2. Apply the GitHub OIDC identity:
-   ```bash
-   cd infra/terraform/bootstrap-identity
-   terraform init
-   terraform apply -var "github_repo=<owner>@<id>/<repo>@<id>"
-   ```
-   The `github_repo` format matters: GitHub's OIDC token subject pins the
-   numeric owner/repo IDs, not just the plain names, once either has
-   ever been renamed. If federation fails with `AADSTS700213`, the error
-   message includes the exact subject GitHub actually sent, use that.
-   `terraform output` gives you `client_id`, `tenant_id`,
-   `subscription_id` for the next step.
-3. Create a GitHub repo and push this repo to it as a mirror. Toptal git
-   stays the source of truth, GitHub only runs the pipeline:
+2. **Create the GitHub repo that will mirror this one and run the
+   pipeline**, before touching `bootstrap-identity`, it needs this repo
+   to already exist so it can reference it:
    ```bash
    git remote add github git@github.com:<you>/<repo>.git
    git push github main
    ```
-4. In the GitHub repo, under Settings > Secrets and variables > Actions:
-   - Secrets: `ARM_CLIENT_ID`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`,
-     `ADMIN_SSH_PUBLIC_KEY`
-   - Variables: `TF_BACKEND_RG`, `TF_BACKEND_SA`, `ACR_NAME`,
-     `ACR_LOGIN_SERVER`, `BACKUP_STORAGE_ACCOUNT_NAME`, `DNS_LABEL`,
+3. **Apply the GitHub OIDC identity**, note this has its own remote
+   state, so it needs the same `-backend-config` flags as the main
+   stack, just a different `key`:
+   ```bash
+   cd infra/terraform/bootstrap-identity
+   terraform init \
+     -backend-config="resource_group_name=<RESOURCE_GROUP from step 1>" \
+     -backend-config="storage_account_name=<STORAGE_ACCOUNT from step 1>" \
+     -backend-config="container_name=tfstate" \
+     -backend-config="key=bootstrap-identity.terraform.tfstate"
+   terraform apply -var "github_repo=<owner>/<repo>"
+   ```
+   Start with the plain `<owner>/<repo>` format. If federation fails on
+   the pipeline's first run with `AADSTS700213`, the error includes the
+   exact subject GitHub actually sent (`owner@<id>/repo@<id>`), once
+   either the account or the repo has ever been renamed, GitHub pins the
+   numeric IDs instead of the plain slug, re-apply with that exact
+   string. `terraform output` now gives you `client_id`, `tenant_id`,
+   `subscription_id`, and `principal_id`, the last one is the service
+   principal's object ID, keep it for step 5.
+4. **Copy `terraform.tfvars.example` to `terraform.tfvars`** in
+   `infra/terraform/environments/prod` (gitignored, this is where the
+   real values live) and fill in `name_prefix`, `location`,
+   `admin_ssh_public_key`, and `backup_storage_account_name` and
+   `dns_label` (both have to be globally unique, pick something
+   specific). Leave `tls_certificate_key_vault_secret_id` empty for now,
+   that's HTTP-only until you issue a certificate, see the TLS section
+   in `docs/architecture.md`. For `keyvault_admin_principal_ids`,
+   include your own object ID (`az ad signed-in-user show --query id -o tsv`)
+   so you can manage secrets after this first apply.
+5. **Apply the main stack locally, once**, to actually create
+   everything and get real output values:
+   ```bash
+   cd infra/terraform/environments/prod
+   terraform init \
+     -backend-config="resource_group_name=<RESOURCE_GROUP from step 1>" \
+     -backend-config="storage_account_name=<STORAGE_ACCOUNT from step 1>" \
+     -backend-config="container_name=tfstate" \
+     -backend-config="key=prod.terraform.tfstate"
+   terraform apply
+   ```
+   Once this succeeds, add the `principal_id` from step 3 to
+   `keyvault_admin_principal_ids` and re-apply, that's what lets the
+   pipeline's own identity read secrets at apply time later on, not just
+   create resources. `terraform output` now gives you `acr_login_server`,
+   `backup_storage_account_name`, `key_vault_uri`, `postgres_fqdn`, and
+   `app_public_url`.
+6. **In the GitHub repo, under Settings > Secrets and variables >
+   Actions:**
+   - Secrets: `ARM_CLIENT_ID`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`
+     (from step 3's outputs), `ADMIN_SSH_PUBLIC_KEY` (same key from
+     step 4)
+   - Variables: `TF_BACKEND_RG`, `TF_BACKEND_SA` (from step 1),
+     `ACR_NAME` (the registry name itself, the part of
+     `acr_login_server` before `.azurecr.io`), `ACR_LOGIN_SERVER` (the
+     full output value), `BACKUP_STORAGE_ACCOUNT_NAME`, `DNS_LABEL`,
      `VM_SKU`, `ENABLE_CDN`, `ENABLE_POSTGRES_HA`, `TLS_CERT_SECRET_ID`,
-     `LOCATION`, `NAME_PREFIX`, `KEYVAULT_ADMIN_PRINCIPAL_IDS` (JSON list
-     of object IDs, see `docs/challenges.md` for why this one has to be
-     explicit rather than derived automatically)
-5. Under Settings > Environments, create a `production` environment with
-   a required reviewer, that's the manual approval gate on `terraform
-   apply`.
-6. `.github/workflows/backup.yml` runs on a daily cron (`0 3 * * *`),
+     `LOCATION`, `NAME_PREFIX` (all the same values you put in
+     `terraform.tfvars` in step 4), `KEYVAULT_ADMIN_PRINCIPAL_IDS` (JSON
+     list, your object ID plus the pipeline's `principal_id` from step
+     3, see `docs/challenges.md` for why this has to be explicit rather
+     than derived automatically)
+7. **Under Settings > Environments, create a `production` environment
+   with a required reviewer**, that's the manual approval gate on
+   `terraform apply`.
+8. `.github/workflows/backup.yml` runs on a daily cron (`0 3 * * *`),
    nothing else to set up for it beyond the secrets/variables above.
+
+From here on, every subsequent change goes through `git push` to `main`
+on the GitHub mirror, see "Deploying" below, you shouldn't need to touch
+Terraform locally again unless you're debugging.
 
 ## Destroying and recreating from scratch
 

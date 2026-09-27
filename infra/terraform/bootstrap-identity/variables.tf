@@ -1,6 +1,6 @@
 variable "github_repo" {
   description = <<-EOT
-    owner/repo on GitHub the pipeline executes from (see docs/runbook.md for
+    owner/repo on GitHub the pipeline executes from (see docs/infrastructure.md for
     why it's GitHub and not git.toptal.com). NOTE: this must match the exact
     subject GitHub's OIDC token actually presents, which can be
     "owner@<id>/repo@<id>" rather than the plain name if the account or repo
