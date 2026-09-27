@@ -20,6 +20,14 @@ The app is deployed and reachable at
 over HTTPS with a real certificate, running in Azure's swedencentral
 region.
 
+To keep costs down between working sessions I've been destroying the
+Azure resources and recreating them with Terraform when needed, that's
+the whole point of everything here being IaC. I'll tear it down again
+after this and bring it back up the day before the interview, so if
+you're reading this outside that window, the link above might be
+temporarily down. Everything it depends on is still fully described in
+this repo either way.
+
 The CI/CD pipeline runs on GitHub Actions against a mirror of this repo
 at [github.com/kristindoni/Kristi-ndoni-github](https://github.com/kristindoni/Kristi-ndoni-github),
 this repo on git.toptal.com stays the source of truth, the mirror only
