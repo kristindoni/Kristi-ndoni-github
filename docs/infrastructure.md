@@ -28,6 +28,74 @@ infra/terraform/
                       never destroys the thing that redeploys it
 ```
 
+## How the bigger modules are actually configured
+
+The tree above is the one line summary, here's what's actually inside
+the four modules that carry the most configuration.
+
+### Application Gateway
+
+This is the traffic router sitting in front of everything, it's also
+where the firewall lives.
+
+It can scale itself up under heavy traffic, same idea as the VMSS
+autoscale but for the gateway itself rather than the app servers, these
+are two completely separate things scaling independently.
+
+The firewall uses OWASP's Core Rule Set, a well known, publicly
+maintained list of patterns that match common attacks like SQL
+injection. It's set to actually block matching requests, not just log
+them and let them through.
+
+It has two entry points. A public one, with the DNS name attached, that
+the internet uses. And a private one, only reachable from inside the
+VNet, that the web tier uses when it needs to call the api tier
+internally, so that internal call doesn't have to go back out to the
+internet and back in.
+
+Routing is simple: anything under `/api/` goes to the api tier,
+everything else goes to the web tier, and each has its own health check
+so the gateway knows which instances are actually up.
+
+HTTPS is optional from the gateway's point of view, if no certificate is
+supplied it just runs plain HTTP, if one is supplied it adds the HTTPS
+listener and starts redirecting HTTP to HTTPS automatically, except for
+one specific path that has to stay on plain HTTP for certificate
+renewal to keep working.
+
+### Postgres
+
+Flexible Server, version 15, sitting in the delegated subnet with public
+access turned off. Backups are always on, two weeks retention, geo
+redundant, that's a couple of properties on the resource itself, not a
+separate system. Zone redundant HA is a single `dynamic` block that only
+appears if `enable_high_availability` is true, when it is, Postgres runs
+a synchronous standby in a different availability zone that takes over
+automatically if the primary fails. Off right now because this
+subscription doesn't offer it.
+
+### Log Analytics and alerting
+
+One workspace, everything lands in it. A data collection rule ships
+syslog from every VMSS instance in Info level and above, and separate
+diagnostic settings send the Application Gateway's access and firewall
+logs, and Postgres's own logs, into the same workspace, so an incident
+touching any tier is queryable in one place instead of three. There's
+one alert defined so far, on the gateway's unhealthy backend host count,
+wired to an action group that isn't connected to anything yet, wiring
+that into email or Slack is a couple of lines whenever it's needed.
+
+### CDN
+
+Azure Front Door Standard, only created at all if `enable_cdn` is true,
+otherwise this module is just skipped. Origin is the gateway's public
+hostname, with its own health probe. Two routes, one matching
+`/images/*` and `/stylesheets/*` that actually caches at the edge and
+compresses what it serves, and a catch-all for everything else that
+forwards straight to origin with no caching, since HTML and API
+responses are dynamic per request and would be wrong to cache. Off right
+now because Front Door is rejected outright on this subscription tier.
+
 ## Setting this up
 
 This is written against my actual setup, not a generic template, swap
@@ -68,13 +136,10 @@ terraform apply -var "github_repo=kristindoni/Kristi-ndoni-github"
 That plain owner/repo value didn't actually work here, GitHub's token
 pinned numeric IDs once the repo got its final name, and the failed run
 told me the exact value to use instead
-(`kristindoni@251518817/Kristi-ndoni-github@1388704715`), see
-[docs/challenges.md](challenges.md). `terraform output` gives you
-`client_id`, `tenant_id`, `subscription_id`, and `principal_id`, keep all
+(`kristindoni@251518817/Kristi-ndoni-github@1388704715`), `terraform output` gives you `client_id`, `tenant_id`, `subscription_id`, and `principal_id`, keep all
 four for later.
 
-Copy `terraform.tfvars.example` to `terraform.tfvars` in
-`infra/terraform/environments/prod`. Mine looks like this:
+`terraform.tfvars` looks like this:
 
 ```
 name_prefix                 = "n3t-prod"
