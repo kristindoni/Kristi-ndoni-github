@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [main]
 
+# Two pushes close together otherwise race on the same state lock: the
+# second run's plan/apply can start while the first run's apply is still
+# holding it, and Terraform correctly refuses the second one rather than
+# risk a corrupt state. Queue runs on the same ref instead of letting them
+# collide; don't cancel an in-progress apply just because a newer commit
+# landed, that's a bigger mess than waiting a few minutes.
+concurrency:
+  group: terraform-prod-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   TF_ROOT: infra/terraform/environments/prod
 

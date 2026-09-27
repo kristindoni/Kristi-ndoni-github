@@ -19,10 +19,10 @@ This README is the entry point, everything else lives in `docs/`:
 
 | Doc | What's in it |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | The diagram, a step-by-step walkthrough of how a request actually flows through the system, and the reasoning behind the bigger design choices (why VMSS over AKS, why one gateway, why the manual approval gate, and so on). Start here if you want the "why". |
+| [docs/architecture.md](docs/architecture.md) | The diagram, a step-by-step walkthrough of how a request actually flows through the system, and the reasoning behind the bigger design choices (why VMSS over AKS, why one gateway, why the manual approval gate, and so on). |
 | [docs/architecture.drawio](docs/architecture.drawio) | The same architecture, with real Azure icons. Open it in [diagrams.net](https://app.diagrams.net) to present it or export a PNG. |
-| [docs/infrastructure.md](docs/infrastructure.md) | What each Terraform module actually provisions, plus every command to bootstrap, deploy, operate (start/stop/scale), and back up the environment. Start here if you want the "how". |
-| [docs/challenges.md](docs/challenges.md) | The real problems I hit while building and running this against a live Azure subscription, and how I fixed each one. This is the part I'd point to if asked how I actually work, not just what I designed. |
+| [docs/infrastructure.md](docs/infrastructure.md) | What each Terraform module actually provisions, plus every command to bootstrap, deploy, operate (start/stop/scale), and back up the environment. |
+| [docs/challenges.md](docs/challenges.md) | The real problems I hit while building and running this against a live Azure subscription, and how I fixed each one. |
 
 ## Repository layout
 

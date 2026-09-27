@@ -128,12 +128,25 @@ to use for break-glass VM access.
      `terraform.tfvars` in step 4), `KEYVAULT_ADMIN_PRINCIPAL_IDS` (JSON
      list, your object ID plus the pipeline's `principal_id` from step
      3, see `docs/challenges.md` for why this has to be explicit rather
-     than derived automatically)
+     than derived automatically), and the ones `backup.yml` needs
+     specifically: `RESOURCE_GROUP`, `DB_HOST` (Postgres FQDN, from
+     `terraform output postgres_fqdn`), `DB_USER`, `DB_NAME`,
+     `DB_PASSWORD_SECRET_URI` (from `terraform output key_vault_uri` +
+     `secrets/db-admin-password`)
 7. **Under Settings > Environments, create a `production` environment
    with a required reviewer**, that's the manual approval gate on
    `terraform apply`.
-8. `.github/workflows/backup.yml` runs on a daily cron (`0 3 * * *`),
-   nothing else to set up for it beyond the secrets/variables above.
+8. `.github/workflows/backup.yml` runs on a daily cron (`0 3 * * *`) plus
+   `workflow_dispatch` for testing it on demand. Worth knowing: GitHub's
+   own docs say scheduled triggers are best-effort and can be delayed or
+   silently skipped under load, there's no guarantee it fires exactly
+   daily. That's fine here specifically because it's a supplementary
+   logical export, not the actual backup mechanism, Postgres Flexible
+   Server's own automated backups (14 day retention, geo-redundant) run
+   independently of GitHub Actions entirely and are what actually
+   satisfies "backups at least daily." If you want to confirm the
+   pg_dump path works without waiting for 3am, trigger it by hand from
+   the Actions tab (or `gh workflow run backup.yml`).
 
 From here on, every subsequent change goes through `git push` to `main`
 on the GitHub mirror, see "Deploying" below, you shouldn't need to touch

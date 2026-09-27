@@ -1,18 +1,13 @@
 # Architecture: step by step, and the choices behind it
 
-This is the architecture write-up the task asks for ("An architectural
-diagram / PPT to explain your architecture during the interview"). I kept
-it as markdown instead of a slide deck, mostly because it's easier to
-keep in sync with the actual Terraform as things change, and it renders
-fine on both git.toptal.com and GitHub.
+Here I have described everything about the architecture choices and design of infrastructure, from deployment to expsoing it to the end user.
 
 ## Diagram
 
 ![Architecture diagram](architecture.png)
 
 The source file is [docs/architecture.drawio](architecture.drawio),
-open it in [diagrams.net](https://app.diagrams.net) if you want to
-present it live or re-export it. The four gray boxes are the same four
+open it in [diagrams.net](https://app.diagrams.net). The four gray boxes are the same four
 groupings I use in the walkthrough below: **Public Entry** (the
 gateway), **Compute** (the two VMSS tiers), **Data** (Postgres), and
 **Supporting Services** (ACR + backup storage). Key Vault, GitHub

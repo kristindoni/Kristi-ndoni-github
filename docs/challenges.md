@@ -163,6 +163,19 @@ infrastructure, not by reading the Terraform:
   with what was actually there rather than trying to recreate resources
   that already existed.
 
+## Two pushes close together raced on the state lock
+
+Pushed a commit, then pushed another one a few minutes later before the
+first pipeline run had finished. The second run's `terraform plan` failed
+with "Error acquiring the state lock", not because anything was actually
+stuck, the first run's `apply` was still legitimately holding it. The
+workflow had no concurrency control, so nothing stopped two runs from
+starting `plan`/`apply` on the same state at the same time. Added a
+`concurrency: group: terraform-prod-${{ github.ref }}` block to
+`ci-cd.yml` so a second push queues behind the first run instead of
+racing it, `cancel-in-progress: false` on purpose, killing a live
+`apply` partway through is worse than waiting a few minutes.
+
 ## `pg_dump` version mismatch
 
 The backup script's first real run failed because Ubuntu 22.04 ships
