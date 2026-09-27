@@ -206,6 +206,25 @@ export RESOURCE_GROUP=n3t-prod-rg API_VMSS_NAME=n3t-prod-vmss-api \
 ./infra/scripts/backup/trigger-daily-backup.sh
 ```
 
+## Getting a shell on an instance
+
+There's no SSH path in from the internet on purpose, the web and api
+tiers have no public IPs and their NSGs deny internet inbound entirely,
+only the gateway is public. For everything I've actually needed, running
+a command directly on an instance works fine and needs no network path
+at all:
+
+```bash
+az vmss run-command invoke -g n3t-prod-rg -n n3t-prod-vmss-web --instance-id 6 \
+  --command-id RunShellScript --scripts "docker ps"
+```
+
+This is the same mechanism the backup job and the TLS renewal hook use.
+Real interactive SSH would mean either standing up Azure Bastion or
+giving every instance in the tier a public IP, since the scale set shares
+one network model across all instances, neither felt worth it for what's
+actually needed here.
+
 ## Diagnosing a problem
 
 Start with the Log Analytics workspace for logs, Azure Monitor on the
