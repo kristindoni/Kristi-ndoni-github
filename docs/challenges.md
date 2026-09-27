@@ -6,7 +6,6 @@ subscription. Just the problem and the fix, no long story.
 | Problem | Fix |
 |---|---|
 | Subscription only allowed 4 vCPUs total in the region I picked first, so both tiers together never fit | Moved to a region with room and switched to a smaller VM size |
-| Moving regions left the old Key Vault stuck in soft-delete for 30 days under its old name | Renamed the new vault instead of waiting it out |
 | Terraform tried to size a couple of resources using values it can't know until after apply | Used explicit true/false variables instead |
 | Application Gateway rejected its internal IP and its TLS policy | Pinned a static IP and switched to the current supported TLS policy |
 | The firewall blocked the app's own internal call to itself | Added the headers it was missing instead of loosening the firewall |
@@ -16,10 +15,7 @@ subscription. Just the problem and the fix, no long story.
 | Fixing a config value didn't take effect on running instances | Had to recreate the instances, not just refresh them |
 | A rolling update refused to start while instances were already unhealthy | Fixed the underlying health issue first, then the update ran fine |
 | A crashed container just stayed down instead of retrying | Added a restart policy so it recovers on its own |
-| First access token for the mirror repo didn't have write access | Regenerated it with the right permissions |
-| Pipeline login kept failing because GitHub pins numeric IDs once a repo's been renamed | Used the exact value from the failed run's own error message |
 | Almost had the pipeline deploy to the wrong region because two variables weren't wired in | Caught it in a plan before it applied, added the missing variables |
-| Key Vault access was tied to whoever happened to be logged in, which breaks the moment a second identity needs it | Made the list of who has access explicit |
 | A couple of stale state locks, and some resources Terraform briefly lost track of | Cleared the locks by hand, re-imported the resources |
 | Two pushes close together once caused a real lock collision | Made the pipeline queue runs instead of letting them race |
 | Backup script's database tool was older than the database itself | Installed a newer version of the tool |
