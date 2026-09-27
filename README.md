@@ -13,6 +13,19 @@ api
 db
 ```
 
+## Live environment
+
+The app is deployed and reachable at
+[https://n3tprod-kndoni.swedencentral.cloudapp.azure.com](https://n3tprod-kndoni.swedencentral.cloudapp.azure.com),
+over HTTPS with a real certificate, running in Azure's swedencentral
+region.
+
+The CI/CD pipeline runs on GitHub Actions against a mirror of this repo
+at [github.com/kristindoni/Kristi-ndoni-github](https://github.com/kristindoni/Kristi-ndoni-github),
+this repo on git.toptal.com stays the source of truth, the mirror only
+exists to run the pipeline. See why in
+[docs/architecture.md](docs/architecture.md).
+
 ## Documentation
 
 This README is the entry point, everything else lives in `docs/`:
