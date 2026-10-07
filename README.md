@@ -20,8 +20,10 @@ The app is deployed and reachable at
 over HTTPS with a real certificate, running in Azure's swedencentral
 region.
 
-To keep costs down between working sessions I have destroyed the
-Azure resources and will be recreating them the day before the interview, so the link above might be temporarily down.
+To keep costs down between working sessions I destroy and recreate the
+Azure resources via this same pipeline rather than leaving them running
+the whole time, so the link above may occasionally be down between
+sessions.
 
 The CI/CD pipeline runs on GitHub Actions against a mirror of this repo
 at [github.com/kristindoni/Kristi-ndoni-github](https://github.com/kristindoni/Kristi-ndoni-github),
